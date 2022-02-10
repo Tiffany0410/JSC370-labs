@@ -119,6 +119,7 @@ stations <- stations[n == 1,][, n := NULL]
 Across all weather stations, what is the median station in terms of temperature, wind speed, and atmospheric pressure? Look for the three weather stations that best represent continental US using the `quantile()` function. Do these three coincide?
 
 ```{r}
+met <- data.table::fread("met_all.gz")
 met <- merge(x = met, y = stations, all.x = T, all.y = F, by.x = 'USAFID', by.y = 'USAF')
 ```
 
@@ -162,12 +163,22 @@ For each state, identify what is the station that is closest to the mid-point of
 
 ```{r}
 mid_point <- met[, .(lon_50 = quantile(lon, probs = .5, na.rm = T),
-                     lat_50 = quantile(lat, probs = .5, na.rm = T),
-                     by = STATE)]
-mid <- merge(x = met, y = mid_point, by = 'STATE')
+                     lat_50 = quantile(lat, probs = .5, na.rm = T)),
+                     by = STATE]
+
+mid <- merge(x = met, y = mid_point, by = "STATE")
 
 # find euclidean distance
+mid[, mid_eudist:= sqrt((lon-lon_50)^2+(lat-lat_50)^2)]
+mid_station <- mid[, .SD[which.min(mid_eudist)], by = STATE]
 
+library(leaflet)
+library(dplyr)
+leaflet() %>%
+  addProviderTiles('CartoDB.Positron') %>% 
+  addCircles(data= mid_station,
+             lat=~lat, lng=~lon, popup='mid station',
+             opacity =1, fillOpacity =1, radius =400, color='Blue')
 ```
 
 Knit the doc and save it on GitHub.
@@ -183,7 +194,9 @@ Start by computing the states' average temperature. Use that measurement to clas
 -   High: temp \>= 25
 
 ```{r}
-
+met[, state_temperature:=mean(temp, na.rm =T), by= STATE]
+met[, temp_cat :=fifelse(state_temperature<20, "low-temp", 
+                         fifelse(state_temperature <25, "mid-temp", "high-temp"))]
 ```
 
 Once you are done with that, you can compute the following:
@@ -197,7 +210,17 @@ Once you are done with that, you can compute the following:
 For each of the temperature levels described before.
 
 ```{r}
-
+table(met$temp_cat, useNA = "always")
+tab <-met[,.(
+  N_entries =.N,
+  N_entries_na =sum(is.na(temp_cat)),
+  N_sations =length(unique(USAFID)),
+  N_states = length(unique(STATE)),
+  mean_temp = mean(temp, na.rm=T),
+  mean_wind.sp = mean(wind.sp, na.rm=T),
+  mean_atm.press = mean(atm.press, na.rm=T)
+        ), by= temp_cat]
+knitr::kable(tab, caption = "cool information I want to show!")
 ```
 
 Knit the document, commit your changes, and push them to GitHub.
@@ -211,7 +234,23 @@ Let's practice running regression models with smooth functions on X. We need the
 -   fit both a linear model and a spline model (use `gam()` with a cubic regression spline on wind speed). Summarize and plot the results from the models and interpret which model is the best fit and why.
 
 ```{r}
+station_ave[, temp_50 := quantile(temp, probs = 0.5, na.rm =TRUE), by =STATE]
+station_ave[, wind.sp_50 := quantile(wind.sp, probs = 0.5, na.rm =TRUE), by =STATE]
 
+library(tidyverse)
+ggplot(station_ave, aes(x=wind.sp_50, y= temp_50)) +
+  geom_point() +
+  geom_smooth(method = 'lm') +
+  geom_smooth(method = "gam", col=2)
+
+library(mgcv)
+lm_mod<-lm(temp_50 ~wind.sp_50, data =station_ave)
+summary(lm_mod)
+plot(lm_mod)
+
+gam_mod <- gam(temp_50 ~ s(wind.sp_50, bs= "cr", k=20), data=station_ave)
+summary(gam_mod)
+plot(gam_mod)
 ```
 
 # Delivarables
@@ -219,5 +258,6 @@ Let's practice running regression models with smooth functions on X. We need the
 -   Answer questions 1-5
 
 -   Paste the link to the github repo you created here
+https://github.com/Tiffany0410/JSC370-labs
 
 -   Submit pdf or html output to Quercus
